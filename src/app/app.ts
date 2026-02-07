@@ -5,6 +5,7 @@ import morgan from "morgan";
 import { routes } from "./routes";
 import cookieParser from "cookie-parser";
 import { errorHandler } from "../common/middlewares/errorHandler";
+import { errorHandlerAiRoute } from '../modules/ai/error.middleware';
 
 export function createApp() {
   const app = express();
@@ -31,6 +32,8 @@ export function createApp() {
 
   // error handling (last)
   app.use(errorHandler);
+
+  app.use(errorHandlerAiRoute);
 
   return app;
 }

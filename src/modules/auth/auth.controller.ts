@@ -29,7 +29,7 @@ export async function sendOtp(req: Request, res: Response) {
         await sendEmail(email, "Email Verification OTP", `Your OTP is: ${otp}`);
 
         res.json({ message: "OTP sent to email" });
-    } catch (error) {
+    } catch (error: any) {
         console.log(error)
         res.send({ message: error.message })
     }

@@ -1,294 +1,333 @@
-import { openai } from "./../../config/openai";
+// ============================================
+// AI Service Layer (Refactored & Production-Ready)
+// ============================================
+
+import { openai } from "../../config/openai";
 import { qdrant } from "../../config/qrdant";
-import { getRelevantTextFromQdrant } from "./ai.controller";
+import { AiChatSession } from './ai.model';
+import {
+  NotFoundError,
+  ProcessingError,
+  SearchResult,
+  ValidationError,
+} from "./ai.types";
+import { generateEmbedding, streamOpenAIResponse } from "./ai.utils";
+import { generalChatPrompt, mcqsChatPrompt, setExamTypePrompt, teachWeakTopicPrompt } from './prompt.templates';
 
-export async function embedText(text: string): Promise<number[]> {
-  if (!text || !text.trim()) {
-    throw new Error("embedText: empty text provided");
-  }
+// ============================================
+// Qdrant Operations
+// ============================================
 
-  const response = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: text,
-  });
+/**
+ * Search for similar chunks in Qdrant
+ */
+// export async function searchChunks(
+//   vector: number[],
+//   collectionName: string,
+//   limit = 10,
+//   minScore = 0.25
+// ): Promise<SearchResult[]> {
+//   try {
+//     const results = await qdrant.search(collectionName, {
+//       vector,
+//       limit,
+//       with_payload: true,
+//       filter: {
+//         must: [
+//           {
+//             key: "code",
+//             match: { value: collectionName },
+//           },
+//         ],
+//       },
+//     });
 
-  return response.data[0].embedding;
-}
-export async function searchChunks(
-  vector: number[],
-  collectionName: string, // courseId for NOW
-  filter: any,
-  limit = 20,
-  minScore = 0.25,
-) {
-  const res = await qdrant.search(collectionName, {
-    vector,
-    limit,
-    with_payload: true,
-    filter: {
-      must: [
-        {
-          key: "courseId",
-          match: { value: collectionName },
-        },
-      ],
-    },
-  });
+//     return results.filter((r: any) => r.score >= minScore);
+//   } catch (error: any) {
+//     throw new ProcessingError(`Failed to search chunks: ${error.message}`);
+//   }
+// }
 
-  return res.filter((r: any) => r.score >= minScore);
-}
-
-export async function streamChatWithDocument(
-  userId: string,
-  courseId: string,
+/**
+ * Get relevant text from Qdrant based on query
+ */
+export async function getRelevantContext(
+  code: string,
   question: string,
-  code: string,
-  onToken: (token: string) => void,
-) {
-  const context = await getRelevantTextFromQdrant(userId, courseId, question, code);
+  limit = 10
+): Promise<string> {
+  try {
+    const queryEmbedding = await generateEmbedding(question);
 
-  console.log(context);
-
-  if (!context.length) {
-    onToken("you question is not in the handout.");
-    return;
-  }
-
-  // 3️⃣ Stream from OpenAI
-  const stream = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    stream: true,
-    temperature: 0.2,
-    messages: [
-      {
-        role: "system",
-        content: `You are an academic AI tutor and exam assistant for university students.
-
-You must STRICTLY use ONLY the provided Document Context.
-Do NOT use external knowledge, assumptions, or general information.
-
-Your task is to understand the USER INTENT and respond accordingly:
-
-1. If the user asks a QUESTION (e.g. "what is", "explain", "define"):
-   - Answer clearly using the document context only.
-   - Include examples ONLY if they exist in the context.
-
-2. If the user asks to GENERATE content (e.g. MCQs, short questions, summaries, notes):
-   - Generate the requested content strictly from the document context.
-   - Use terminology, definitions, and examples exactly as in the document.
-
-3. If the user input is grammatically weak or informal:
-   - Infer the intent carefully.
-   - Do NOT reject the request if the topic exists in the context.
-
-4. If the topic is PARTIALLY covered in the document:
-   - Answer using only the available information.
-   - Do NOT add missing details.
-
-5. If the topic is COMPLETELY absent from the document:
-   - Respond exactly with:
-     "you question is not in the handout."
-
-IMPORTANT RULES:
-- Never answer outside the document context.
-- Never say "irrelevant question" if the topic exists.
-- Never invent facts or examples.
-- Be student-friendly and concise.
-- Format answers cleanly (paragraphs, bullet points, or numbered lists when appropriate).
-`,
+    const searchResults = await qdrant.search(code, {
+      vector: queryEmbedding,
+      limit,
+      with_payload: true,
+      filter: {
+        must: [
+          {
+            key: "code",
+            match: { value: code },
+          },
+        ],
       },
-      {
-        role: "user",
-        content: `
-Question:
-${question}
+    });
 
-Document Context:
-${context}
-`,
-      },
-    ],
-  });
+    const texts = searchResults
+      .map((result: any) => result.payload?.text)
+      .filter(Boolean);
 
-  for await (const chunk of stream) {
-    const token = chunk.choices[0]?.delta?.content;
-    if (token) {
-      onToken(token);
+    if (texts.length === 0) {
+      return "";
     }
+
+    return texts.join("\n\n");
+  } catch (error: any) {
+    throw new ProcessingError(`Failed to get relevant context: ${error.message}`);
   }
 }
 
+// ============================================
+// Chat Streaming Service
+// ============================================
+
+/**
+ * Stream chat response with document context
+ */
+export async function streamChatWithDocument(
+  { ...rest },
+  onToken: (token: string) => void
+): Promise<void> {
+  try {
+
+    const { message, code } = rest
+    let question = message
+
+    // Get relevant context from Qdrant
+    const context = await getRelevantContext(code, question);
+
+    if (!context || context.length < 50) {
+      onToken("I couldn't find relevant information in the document to answer your question.");
+      return;
+    }
+
+    const messages = generalChatPrompt(question, context)
+
+    await streamOpenAIResponse(messages, onToken);
+  } catch (error: any) {
+    throw new ProcessingError(`Failed to stream chat: ${error.message}`);
+  }
+}
+
+// ============================================
+// Quiz Generation Service
+// ============================================
+
+/**
+ * Generate quiz based on document content
+ */
 export async function generateQuizWithDocument(
-  userId: string,
-  courseId: string,
-  code: string,
-  onToken: (token: string) => void,
-) {
-  const question =
-    "Important concepts and definitions discussed in this document";
+  { ...rest },
+  onToken: (token: string) => void
+): Promise<void> {
+  try {
+    const { code } = rest
+    const question = "Important concepts and definitions discussed in this document";
 
-  const finalSummary = await getRelevantTextFromQdrant(
-    userId,
-    courseId,
-    question,
-    code
-  );
+    const context = await getRelevantContext(code, question, 15);
 
-  console.log(finalSummary)
-  if (!finalSummary.length) {
-    onToken("you question is not in the handout.");
-    return;
-  }
-
-  // 3️⃣ Stream from OpenAI
-  const stream = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    stream: true,
-    temperature: 0.2,
-    messages: [
-      {
-        role: "system",
-        content: `You are an academic exam question generator.
-
-STRICT RULES (DO NOT VIOLATE):
-- Generate MCQs ONLY from the provided summary.
-- Do NOT use any external knowledge.
-- Do NOT repeat the same topic if multiple topics are present.
-- Randomly select ONE topic from the summary for this quiz generation.
-- Generate questions ONLY from that selected topic.
-- Each question MUST be clearly answerable from the summary.
-- Do NOT invent facts, numbers, or terminology.
-- Do NOT include explanations not supported by the summary.
-- Do NOT add extra text outside the JSON format.
-- If the summary does not contain enough information for MCQs, return an EMPTY JSON array [].
-
-OUTPUT FORMAT RULES:
-- Output MUST be a valid JSON array.
-- start with prefix QUIZ_JSON:
-- Each object MUST contain exactly:
-  - "question"
-  - "options" (array of exactly 4 strings)
-  - "correctAnswer" (must match one option exactly)
-  - "reason" (must be directly supported by the summary)
-`,
-      },
-      {
-        role: "user",
-        content: `Task:
-Generate exactly 2 multiple-choice questions (MCQs).
-
-Instructions:
-- First, identify distinct topics in the summary.
-- Randomly choose ONE topic.
-- Generate all 5 MCQs from that single chosen topic.
-- Do NOT mention the topic name explicitly in the questions.
-- Keep difficulty at undergraduate exam level.
-
-Summary:
-${finalSummary}
-`,
-      },
-    ],
-  });
-
-  for await (const chunk of stream) {
-    const token = chunk.choices[0]?.delta?.content;
-    if (token) {
-      onToken(token);
+    if (!context || context.length < 100) {
+      onToken("Not enough content in the document to generate a quiz.");
+      return;
     }
+
+
+    const message = mcqsChatPrompt(context);
+    await streamOpenAIResponse(message, onToken);
+  } catch (error: any) {
+    throw new ProcessingError(`Failed to generate quiz: ${error.message}`);
   }
 }
 
+// ============================================
+// Weak Topics Analysis Service
+// ============================================
 
-export async function analyzeWeakTopicsService(
-  userId: string,
-  courseId: string,
+/**
+ * Analyze weak topics based on wrong answers
+ */
+export async function analyzeWeakTopics(
+  code: string,
   wrongAnswers: any[],
-  onToken: (token: string) => void,
-) {
-  if (!wrongAnswers || !wrongAnswers.length) {
-    onToken("No incorrect answers provided.");
-    return;
-  }
+  onToken: (token: string) => void
+): Promise<void> {
+  try {
+    if (!wrongAnswers || wrongAnswers.length === 0) {
+      onToken("No incorrect answers provided for analysis.");
+      return;
+    }
 
-  // 🔹 Step 1: Build a semantic query from wrong answers
-  const analysisQuery = `
-Analyze the following incorrect answers and identify the related concepts:
+    // Build analysis query
+    const analysisQuery = `
+Analyze these incorrect answers and identify related concepts:
 ${wrongAnswers
-      .map(
-        (w) =>
-          `Question: ${w.question}
-Selected Answer: ${w.selected}
-Correct Answer: ${w.correct}`
-      )
-      .join("\n\n")}
+        .map(
+          (w, idx) =>
+            `${idx + 1}. Question: ${w.question}
+   Your Answer: ${w.selected || w.correctAnswer}
+   Correct Answer: ${w.correct || w.correctAnswer}`
+        )
+        .join("\n\n")}
 `;
 
-  // 🔹 Step 2: Retrieve supporting document context
-  const context = await getRelevantTextFromQdrant(
-    userId,
-    courseId,
-    analysisQuery
-  );
+    const context = await getRelevantContext(code, analysisQuery, 15);
 
-  if (!context || context.length < 100) {
-    onToken("Relevant content not found in the document.");
-    return;
-  }
+    if (!context || context.length < 100) {
+      onToken("I couldn't find relevant content in the document for analysis.");
+      return;
+    }
 
-  // 🔹 Step 3: Ask LLM to analyze weakness (NOT generate MCQs)
-  const stream = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    stream: true,
-    temperature: 0.2,
-    messages: [
-      {
-        role: "system",
-        content: `
-You are an academic tutor analyzing student mistakes.
+    const stream = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      stream: true,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content: `You are an academic tutor analyzing student mistakes.
 
 RULES:
-- Use ONLY the provided document context.
-- Identify weak topics based on incorrect answers.
-- Explain why the student is weak in those topics.
-- Suggest what to study next from the document.
-- Do NOT generate quiz questions.
-- Do NOT use external knowledge.
-- Be clear and student-friendly.
-`
-      },
-      {
-        role: "user",
-        content: `
-Incorrect Answers:
+- Use ONLY the provided document context
+- Identify weak topics based on incorrect answers
+- Explain why the student is weak in those topics
+- Suggest what to study next from the document
+- Do NOT generate quiz questions
+- Be clear and student-friendly
+
+FORMAT:
+1. **Weak Topics Identified:**
+   - Topic 1
+   - Topic 2
+
+2. **Why You're Weak:**
+   - Explanation
+
+3. **What to Study:**
+   - Specific sections/concepts from the document
+`,
+        },
+        {
+          role: "user",
+          content: `Incorrect Answers:
 ${analysisQuery}
 
 Document Context:
 ${context}
 
-Task:
-1. Identify weak topic(s)
-2. Explain the misunderstanding
-3. Suggest what the student should revise
-`
-      }
-    ],
-  });
+Please analyze my weak areas and suggest what to study.`,
+        },
+      ],
+    });
 
-  for await (const chunk of stream) {
-    const token = chunk.choices[0]?.delta?.content;
-    if (token) onToken(token);
+    let hasContent = false;
+
+    for await (const chunk of stream) {
+      const token = chunk.choices[0]?.delta?.content;
+      if (token) {
+        hasContent = true;
+        onToken(token);
+      }
+    }
+
+    if (!hasContent) {
+      onToken("Failed to analyze weak topics. Please try again.");
+    }
+  } catch (error: any) {
+    throw new ProcessingError(`Failed to analyze weak topics: ${error.message}`);
   }
 }
 
+// ============================================
+// Weak Topic Teaching Service (Future Implementation)
+// ============================================
+
+/**
+ * Teach weak topics in detail
+ */
+export async function teachWeakTopic(
+  code: string,
+  topic: string,
+  onToken: (token: string) => void
+): Promise<void> {
+  try {
+    const context = await getRelevantContext(code, topic, 10);
+
+    if (!context || context.length < 100) {
+      onToken("I couldn't find information about this topic in the document.");
+      return;
+    }
+
+
+    const message = teachWeakTopicPrompt(topic, context);
+    await streamOpenAIResponse(message, onToken);
+  }
+  catch (error: any) {
+    throw new ProcessingError(`Failed to teach weak topic: ${error.message}`);
+  }
+}
+
+// ============================================
+// Set Exam Stage Service
+// ============================================
+
+/**
+ * Set exam stage and extract topics
+ */
+export async function setExamStage(userId: string,
+  message: any, body: any, code: string,
+  onToken: (token: string) => void) {
+  try {
+
+    const existingSession = await AiChatSession.findOne({
+      userId, code,
+    })
+
+    if (!existingSession) {
+      await new AiChatSession({
+        userId,
+        examType: body,
+        code
+      }).save()
+
+    }
+
+
+    const question = `
+Extract all lecture, lesson, or topic titles with their serial numbers.
+
+Rules:
+- Prefer "Table of Contents" if present.
+- If no Table of Contents exists, extract headings such as
+  Lesson, Lecture, Unit, or main topic titles in order.
+- Preserve original numbering if available.
+`
+
+    const context = await getRelevantContext(code, question, 15);
 
 
 
-export async function weakTopicTeachService(userId: string,
-  courseId: string,
-  wrongAnswers: any[],
-  onToken: (token: string) => void,) {
+    if (!context || context.length < 100) {
+      onToken("Not enough content in the document to generate a quiz.");
+      return;
+    }
 
 
+    const message = setExamTypePrompt(body, context);
 
+    await streamOpenAIResponse(message, onToken);
+
+  } catch (error: any) {
+
+    throw new ProcessingError(`Failed to process setExamType: ${error.message}`);
+  }
 }

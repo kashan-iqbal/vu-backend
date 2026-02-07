@@ -16,10 +16,9 @@ export async function getProfile(req: any, res: Response) {
 
 export async function newsLetter(req: any, res: Response) {
     const { email } = req.body
-    const result = await NewsLetterModel.findOne({email})
+    const result = await NewsLetterModel.findOne({ email })
 
-    console.log(result ,email , `i am mail`)
-    
+
 
     if (result) {
         res.json({ message: "Already subscribe" });

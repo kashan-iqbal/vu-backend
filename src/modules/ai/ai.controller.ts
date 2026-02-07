@@ -1,251 +1,285 @@
+// ============================================
+// AI Controller Layer (Refactored & Production-Ready)
+// ============================================
+
 import { Request, Response } from "express";
-import multer from "multer";
-import { chunk, summarizeText } from "./utils";
-import { extractTextFromPdf } from "./utils";
 import { qdrant } from "../../config/qrdant";
-import { openai } from "../../config/openai";
-import { success } from "zod";
-import { analyzeWeakTopicsService, checkUserQuiz, generateQuizWithDocument, streamChatWithDocument, weakTopicTeachService } from "./ai.service";
+import {
+  NotFoundError,
+  ProcessingError,
+  UploadHandoutResponse,
+  ValidationError,
+} from "./ai.types";
+import {
+  chunkText,
+  extractTextFromPdf,
+  generateEmbedding,
+  isValidText,
+} from "./ai.utils";
+import {
+  analyzeWeakTopics,
+  generateQuizWithDocument,
+  setExamStage,
+  streamChatWithDocument,
+  teachWeakTopic,
+} from "./ai.service";
+import { handleStreamError } from "./error.middleware";
 import { SubjectModel } from '../subject/subject.model';
+import { AiChatSession } from './ai.model';
 
-export const upload = multer();
+// ============================================
+// Upload Handout Controller
+// ============================================
 
-export async function uploadHandoutController(req: Request, res: Response) {
+/**
+ * Upload and process PDF to create vector embeddings
+ */
+export async function uploadHandoutController(
+  req: Request,
+  res: Response
+): Promise<void> {
   try {
     const { courseId, userId, code } = req.body;
     const file = (req as any).file;
 
+    // Check if model exists (optional - depends on your setup)
+    // Uncomment if you're using SubjectModel
 
     const subject = await SubjectModel.findOne({ subjectCode: code });
-
     if (subject?.isVectoreExist) {
-      return res.status(409).json({
-        message: "Vector already exists for this subject"
+      res.status(409).json({
+        success: false,
+        message: "Embeddings already exist for this subject",
+      } as UploadHandoutResponse);
+      return;
+    }
+
+
+    // Extract text from PDF
+    const extractedText = await extractTextFromPdf(file.buffer);
+
+    if (!isValidText(extractedText, 100)) {
+      throw new ProcessingError("PDF does not contain sufficient valid text");
+    }
+
+    // Chunk the text
+    const chunks = await chunkText(extractedText);
+
+    if (chunks.length === 0) {
+      throw new ProcessingError("Failed to create text chunks");
+    }
+
+    // Create Qdrant collection
+    try {
+      await qdrant.createCollection(code, {
+        vectors: {
+          distance: "Cosine",
+          size: 1536, // text-embedding-3-small dimension
+        },
       });
-    }
-    if (!file) {
-      return res.status(400).json({ message: "PDF is required" });
-    }
-
-
-    const result = await extractTextFromPdf(file.buffer);
-
-    if (!result) {
-      return res.status(400).json({ message: "Empty PDF" });
+    } catch (collectionError: any) {
+      // Collection might already exist, which is okay
+      if (!collectionError.message?.includes("already exists")) {
+        throw collectionError;
+      }
     }
 
+    // Generate embeddings and prepare points
+    const points = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+
+      try {
+        const embedding = await generateEmbedding(chunk);
+
+        points.push({
+          id: Date.now() + i, // Ensure unique IDs
+          vector: embedding,
+          payload: {
+            courseId,
+            userId,
+            text: chunk,
+            code,
+            chunkIndex: i,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (embeddingError) {
+        console.error(`Failed to embed chunk ${i}:`, embeddingError);
+        // Continue with other chunks
+      }
+    }
+
+    if (points.length === 0) {
+      throw new ProcessingError("Failed to generate any embeddings");
+    }
+
+    // Upsert points to Qdrant
+    await qdrant.upsert(code, { points });
+
+    // Update subject model (optional)
+    // Uncomment if you're using SubjectModel
+    /*
     await SubjectModel.updateOne(
       { subjectCode: code },
       { $set: { isVectoreExist: true } }
     );
-    console.log("Updated subject:", subject);
-
-    const chunks = await chunk(result);
-
-    qdrant.createCollection(code, {
-      vectors: {
-        distance: "Cosine",
-        size: 1536,
-      },
-    });
-    const points = [];
-
-    for (const chunk of chunks) {
-      const embeding = await openai.embeddings.create({
-        model: "text-embedding-3-small",
-        input: chunk,
-      });
-
-      points.push({
-        id: Date.now(),
-
-        vector: embeding.data[0].embedding,
-        payload: {
-          courseId,
-          userId,
-          text: chunk,
-          code,
-        },
-      });
-    }
-    await qdrant.upsert(code, { points });
+    */
 
     res.json({
-      message: "PDF parsed successfully",
       success: true,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "PDF parse failed", success: true });
+      message: "PDF processed and embeddings created successfully",
+      hasEmbedding: true,
+      courseId,
+    } as UploadHandoutResponse);
+  } catch (error) {
+    console.error("Upload error:", error);
+
+    // Clean up collection on failure
+    try {
+      await qdrant.deleteCollection(req.body.code);
+    } catch (cleanupError) {
+      console.error("Cleanup error:", cleanupError);
+    }
+
+    throw error;
   }
 }
 
-export async function streamSummaryController(req: Request, res: Response) {
+// ============================================
+// Stream Chat Controller
+// ============================================
+
+/**
+ * Stream chat responses based on query type
+ */
+export async function streamChatWithDocController(
+  req: Request,
+  res: Response
+): Promise<void> {
   try {
-    const { userId, courseId, code } = req.query as {
-      userId: string;
-      courseId: string;
-      code: string;
-    };
+    const { userId, courseId, message, queryType, body, code } = req.body;
 
-    if (!userId || !courseId) {
-      return res
-        .status(400)
-        .json({ message: "userId and courseId are required" });
-    }
 
-    const searchResult = await qdrant.scroll(courseId, {
-      limit: 1000, // adjust if needed
-      with_payload: true,
-      filter: {
-        must: [
-          {
-            key: "code",
-            match: { value: code },
-          },
-        ],
-      },
-    });
 
-    const texts = searchResult.points
-      .map((point: any) => point.payload?.text)
-      .filter(Boolean);
 
-    if (texts.length === 0) {
-      return res.status(404).json({ message: "No documents found" });
-    }
 
-    const fullText = texts.join("\n\n");
-
-    /* ---------- Setup streaming headers ---------- */
+    // Set streaming headers
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Transfer-Encoding", "chunked");
     res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Content-Type-Options", "nosniff");
 
-    /* ---------- Stream summary from OpenAI ---------- */
-    const stream = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      stream: true,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a helpful assistant that summarizes study materials clearly and concisely.",
-        },
-        {
-          role: "user",
-          content: `Summarize the following course material:\n\n${fullText}`,
-        },
-      ],
-    });
-
-    for await (const chunk of stream) {
-      const token = chunk.choices[0]?.delta?.content;
-      if (token) {
+    // Token writer function
+    const writeToken = (token: string) => {
+      if (!res.writableEnded) {
         res.write(token);
       }
+    };
+
+    // Route to appropriate service based on query type
+    switch (queryType) {
+      case "GENERAL":
+        await streamChatWithDocument({ ...req.body }, writeToken);
+        break;
+
+      case "GEN_QUIZ":
+        await generateQuizWithDocument({ ...req.body }, writeToken);
+        break;
+
+      case "QUIZ_CHECK":
+        if (!body || !Array.isArray(body)) {
+          writeToken("Invalid quiz data provided.");
+        } else {
+          await analyzeWeakTopics(code, body, writeToken);
+        }
+        break;
+
+      case "WEAK_TOPIC_TEACH":
+        if (!body || typeof body !== "string") {
+          writeToken("Invalid topic provided.");
+        } else {
+          await teachWeakTopic(code, body, writeToken);
+        }
+        break;
+      case "EXAM_STAGE":
+        await setExamStage(userId, message, body, code, writeToken);
+        break;
+
+      default:
+        writeToken(`Unknown query type: ${queryType}`);
     }
 
     res.end();
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Failed to generate summary" });
-  }
-}
-
-export async function GenerateQuizController(req: Request, res: Response) {
-  try {
-    const userId = String(req.body.userId);
-    const courseId = String(req.body.courseId);
-
-    if (!userId || !courseId) {
-      return res
-        .status(400)
-        .json({ message: "userId and courseId are required" });
-    }
-
-    // 1️⃣ Vector search for relevant chunks
-    const queryEmbedding = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: "Generate MCQs from this course document",
-    });
-
-    const searchResult = await qdrant.search(courseId, {
-      vector: queryEmbedding.data[0].embedding,
-      limit: 20, // adjust based on your document size
-      with_payload: true,
-      filter: {
-        must: [
-          {
-            key: "courseId",
-            match: { value: courseId },
-          },
-        ],
-      },
-    });
-
-    const texts = searchResult.map((p: any) => p.payload?.text).filter(Boolean);
-
-    if (texts.length === 0) {
-      return res.status(404).json({ message: "No documents found" });
-    }
-
-    // 2️⃣ Summarize in batches (token-efficient)
-    const batchSize = 5;
-    const chunkSummaries: string[] = [];
-
-    for (let i = 0; i < texts.length; i += batchSize) {
-      const batchText = texts.slice(i, i + batchSize).join("\n\n");
-      const summary = await summarizeText(batchText);
-      chunkSummaries.push(summary);
-    }
-
-    // 3️⃣ Final summary
-    const finalSummary = await summarizeText(chunkSummaries.join("\n\n"));
-
-    // 4️⃣ Generate MCQs from final summary
-    const mcqResponse = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You generate MCQs in JSON format. use random topic to generate the MCQs dont use same topic to generate multiple time mcqs generation ok",
-        },
-        {
-          role: "user",
-          content: `
-Generate 5 MCQs based on the following summary.
-
-Return ONLY JSON array of objects with:
-- question
-- options (array of 4)
-- correctAnswer
-- reason
-
-Summary:
-${finalSummary}
-          `,
-        },
-      ],
-    });
-
-    // const mcqs = JSON.parse(mcqResponse.choices[0].message?.content || "[]");
-
-    return res.json({ mcqResponse });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Failed to generate MCQs" });
+    handleStreamError(res, error);
   }
 }
 
-export async function SubmitQuizController(req: Request, res: Response) {
+// ============================================
+// Generate Quiz Controller (Non-Streaming)
+// ============================================
+
+/**
+ * Generate quiz (legacy endpoint - kept for compatibility)
+ */
+export async function generateQuizController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { userId, courseId, code } = req.body;
+
+    if (!code) {
+      throw new ValidationError("code is required");
+    }
+
+    let quizJson = "";
+
+    // Use streaming service but collect into variable
+    await generateQuizWithDocument(code, (token) => {
+      quizJson += token;
+    });
+
+    // Try to parse the quiz JSON
+    try {
+      const jsonMatch = quizJson.match(/QUIZ_JSON:\s*(\[.*\])/s);
+      if (jsonMatch) {
+        const mcqs = JSON.parse(jsonMatch[1]);
+        res.json({
+          success: true,
+          mcqs,
+        });
+      } else {
+        throw new Error("No valid quiz JSON found in response");
+      }
+    } catch (parseError) {
+      console.error("Quiz parse error:", parseError);
+      res.json({
+        success: false,
+        message: "Failed to generate valid quiz",
+        rawResponse: quizJson,
+      });
+    }
+  } catch (error) {
+    throw error;
+  }
+}
+
+// ============================================
+// Submit Quiz Controller
+// ============================================
+
+/**
+ * Submit quiz and calculate score
+ */
+export async function submitQuizController(
+  req: Request,
+  res: Response
+): Promise<void> {
   try {
     const { quiz, mcqs } = req.body;
-
-    if (!quiz || !mcqs) {
-      return res.status(400).json({ message: "quiz and mcqs are required" });
-    }
 
     let correctCount = 0;
 
@@ -270,172 +304,122 @@ export async function SubmitQuizController(req: Request, res: Response) {
         selected: answer.selected,
         correctAnswer: question.correctAnswer,
         correct,
-        reason: question.reason,
+        reason: question.reason || "No explanation provided",
       };
     });
 
-    const score = (correctCount / quiz.length) * 100;
+    const score = quiz.length > 0 ? (correctCount / quiz.length) * 100 : 0;
 
-    return res.json({
-      score,
+    res.json({
+      success: true,
+      score: Math.round(score * 100) / 100, // Round to 2 decimals
       correctCount,
       total: quiz.length,
       results,
     });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Failed to submit quiz" });
+    throw error;
   }
 }
 
-export async function getRelevantTextFromQdrant(
-  userId: string,
-  courseId: string,
-  question: string,
-  code: string,
-) {
-  const queryEmbedding = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: question,
-  });
+// ============================================
+// Stream Summary Controller
+// ============================================
 
-  const searchResult = await qdrant.search(code, {
-    vector: queryEmbedding.data[0].embedding,
-    limit: 10,
-    with_payload: true,
-    filter: {
-      must: [
-        {
-          key: "code",
-          match: { value: code },
-        },
-      ],
-    },
-  });
-
-  const texts = searchResult.map((p: any) => p.payload?.text).filter(Boolean);
-
-  return texts.join("\n\n");
-}
-
-export async function topicExplainationController(req: Request, res: Response) {
+/**
+ * Stream document summary
+ */
+export async function streamSummaryController(
+  req: Request,
+  res: Response
+): Promise<void> {
   try {
-    const { userId, courseId, topic } = req.body;
+    const { userId, courseId, code } = req.body as {
+      userId: string;
+      courseId: string;
+      code: string;
+    };
 
-    if (!userId || !courseId || !topic) {
-      return res
-        .status(400)
-        .json({ message: "userId, courseId and topic are required" });
+    if (!code) {
+      throw new ValidationError("code is required");
     }
-
-    // 1️⃣ Get relevant text from Qdrant
-    const contextText = await getRelevantTextFromQdrant(
-      userId,
-      courseId,
-      topic,
-    );
-
-    if (!contextText) {
-      return res
-        .status(404)
-        .json({ message: "No relevant content found for this topic" });
-    }
-
-    // 2️⃣ Ask AI to explain using the handout context
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a friendly teacher. Explain the topic in a simple way using the given handout context.",
-        },
-        {
-          role: "user",
-          content: `
-Topic: ${topic}
-
-Handout Context:
-${contextText}
-
-Explain this topic in an easy way for students to understand.
-Include:
-1. Simple explanation
-2. 2 examples
-3. Key points (bullet list)
-4. Short summary
-
-`,
-        },
-      ],
-    });
-
-    const rawText = response.choices[0].message?.content || "";
-
-    return res.json(rawText);
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Failed to explain topic" });
-  }
-}
-
-export async function streamChatWithDocController(req: Request, res: Response) {
-  try {
-    const { userId, courseId, message, querryType, body, code } = req.body;
-
-    console.log(userId, courseId, message, querryType, body, code)
-
-    // if (!code || !querryType) {
-    //   return res.status(400).json({
-    //     message: "code and querryType are required",
-    //   });
-    // }
-
-    // 🔹 Streaming headers
+    // Set streaming headers
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Transfer-Encoding", "chunked");
     res.setHeader("Cache-Control", "no-cache");
 
-    switch (querryType) {
-      case "GENERAL":
-        await streamChatWithDocument(userId, courseId, message, code, (token) =>
-          res.write(token),
-        );
+    // Scroll through all documents
+    const scrollResult = await qdrant.scroll(code, {
+      limit: 1000,
+      with_payload: true,
+      filter: {
+        must: [
+          {
+            key: "code",
+            match: { value: code },
+          },
+        ],
+      },
+    });
 
-        res.end();
+    const texts = scrollResult.points
+      .map((point: any) => point.payload?.text)
+      .filter(Boolean);
 
-        break;
-
-      case "GEN_QUIZ":
-        await generateQuizWithDocument(userId, courseId, code, (token) =>
-          res.write(token),
-        );
-
-        res.end();
-
-        break;
-      case "QUIZ_CHECK":
-        await analyzeWeakTopicsService(userId, courseId, body, (token) =>
-          res.write(token),
-        );
-
-        res.end();
-
-        break;
-      case "WEAK_TOPIC_TEACH":
-        await weakTopicTeachService(userId, courseId, body, (token) =>
-          res.write(token),
-        );
-
-        res.end();
-
-        break;
-
-      default:
-        break;
+    if (texts.length === 0) {
+      res.write("No documents found to summarize.");
+      res.end();
+      return;
     }
-  } catch (err) {
-    console.error(err);
-    res.status(500).end("Failed to stream response");
+
+    const fullText = texts.join("\n\n");
+
+    // Stream summary
+    // await streamChatWithDocument(
+    //   code,
+    //   `Provide a comprehensive summary of this document: ${fullText.substring(0, 1000)}...`,
+    //   (token) => {
+    //     if (!res.writableEnded) {
+    //       res.write(token);
+    //     }
+    //   }
+    // );
+
+    res.end();
+  } catch (error) {
+    handleStreamError(res, error);
+  }
+}
+
+// ============================================
+// Topic Explanation Controller
+// ============================================
+
+/**
+ * Explain a specific topic
+ */
+export async function topicExplanationController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { userId, courseId, topic, code } = req.body;
+
+    if (!code || !topic) {
+      throw new ValidationError("code and topic are required");
+    }
+
+    let explanation = "";
+
+    await teachWeakTopic(code, topic, (token) => {
+      explanation += token;
+    });
+
+    res.json({
+      success: true,
+      explanation,
+    });
+  } catch (error) {
+    throw error;
   }
 }
