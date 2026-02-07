@@ -6,6 +6,7 @@ import { routes } from "./routes";
 import cookieParser from "cookie-parser";
 import { errorHandler } from "../common/middlewares/errorHandler";
 import { errorHandlerAiRoute } from '../modules/ai/error.middleware';
+import { env } from '../config/env';
 
 export function createApp() {
   const app = express();
@@ -13,7 +14,7 @@ export function createApp() {
   // security + basics
   app.use(helmet());
   app.use(cors({
-    origin: "http://localhost:3000",
+    origin: env.FRONTEND_URL,
     credentials: true
   }
   ));
