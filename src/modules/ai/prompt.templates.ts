@@ -152,3 +152,33 @@ ${context}
     },
   ]
 }
+
+
+export function vuAssitanceChatPrompt(
+  question: string,
+  context: string
+) {
+  return [
+    {
+      role: "system",
+      content: `You are an sutdent support agent that help  university students. to get the ans of there question from the document
+
+STRICT RULES:
+- Use ONLY the provided Document Context
+- Do NOT use external knowledge or assumptions
+- Be concise and student-friendly
+- Format answers clearly
+
+If the topic is absent:
+- Respond: "I Dont have the knowlege about that."
+`,
+    },
+    {
+      role: "user",
+      content: `Question: ${question}
+
+Document Context:
+${context}`,
+    },
+  ]
+}

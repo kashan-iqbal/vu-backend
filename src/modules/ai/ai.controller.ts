@@ -15,10 +15,12 @@ import {
   extractTextFromPdf,
   generateEmbedding,
   isValidText,
+  streamOpenAIResponse,
 } from "./ai.utils";
 import {
   analyzeWeakTopics,
   generateQuizWithDocument,
+  getRelevantContext,
   setExamStage,
   streamChatWithDocument,
   teachWeakTopic,
@@ -26,6 +28,7 @@ import {
 import { handleStreamError } from "./error.middleware";
 import { SubjectModel } from '../subject/subject.model';
 import { AiChatSession } from './ai.model';
+import { vuAssitanceChatPrompt } from './prompt.templates';
 
 // ============================================
 // Upload Handout Controller
@@ -217,6 +220,46 @@ export async function streamChatWithDocController(
   }
 }
 
+
+
+
+export async function vuAssistantController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { message } = req.body;
+
+    // Set streaming headers
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.setHeader("Cache-Control", "no-cache");
+
+    // Token writer function
+    const writeToken = (token: string) => {
+      if (!res.writableEnded) {
+        res.write(token);
+      }
+    };
+
+    const context = await getRelevantContext("GN000", message);
+
+    if (!context || context.length < 50) {
+      writeToken("I couldn't find relevant information in the document to answer your question.");
+      return;
+    }
+
+
+
+    const messages = vuAssitanceChatPrompt(message, context);
+
+    await streamOpenAIResponse(messages, writeToken);
+
+    res.end();
+  } catch (error) {
+    handleStreamError(res, error);
+  }
+}
 // ============================================
 // Generate Quiz Controller (Non-Streaming)
 // ============================================

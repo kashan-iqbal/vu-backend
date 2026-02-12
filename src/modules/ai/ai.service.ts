@@ -2,6 +2,7 @@
 // AI Service Layer (Refactored & Production-Ready)
 // ============================================
 
+import e from 'express';
 import { openai } from "../../config/openai";
 import { qdrant } from "../../config/qrdant";
 import { AiChatSession } from './ai.model';
@@ -58,19 +59,13 @@ export async function getRelevantContext(
 ): Promise<string> {
   try {
     const queryEmbedding = await generateEmbedding(question);
+    console.log(code, question, queryEmbedding, `i am code question and embedding`)
+    console.log(await qdrant.getCollection("GN000"), `i am collection info`);
 
     const searchResults = await qdrant.search(code, {
       vector: queryEmbedding,
       limit,
       with_payload: true,
-      filter: {
-        must: [
-          {
-            key: "code",
-            match: { value: code },
-          },
-        ],
-      },
     });
 
     const texts = searchResults

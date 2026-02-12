@@ -7,6 +7,7 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   OPENAI_API_KEY: z.string(),
   QDRANT_URL: z.string(),
+  QDRANT_API_KEY: z.string().optional(),
   FRONTEND_URL: z.string().url(),
 
 });

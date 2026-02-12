@@ -11,6 +11,7 @@ import {
   generateQuizController,
   submitQuizController,
   topicExplanationController,
+  vuAssistantController,
 } from "./ai.controller";
 import {
   validateUploadRequest,
@@ -81,6 +82,13 @@ aiRouter.post(
   "/chat-doc/stream",
   validateStreamChatRequest,
   streamChatWithDocController
+);
+
+
+
+aiRouter.post(
+  "/vu-assistant",
+  vuAssistantController
 );
 
 /**
