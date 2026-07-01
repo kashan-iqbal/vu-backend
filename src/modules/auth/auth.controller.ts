@@ -3,35 +3,60 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { EmailOtpModel } from "./emailOtp.model";
-import { UserModel } from "../user/user.model";
-import { sendEmail } from "../../common/utils/sendEmail";
+import { UserModel, AuthProvider } from "../user/user.model";
+import { sendTemplatedEmail } from "../../common/utils/sendEmail";
 import { PasswordResetOtpModel } from "./passwordResetOtp.model";
+import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
+
+// Max wrong OTP guesses before the code is invalidated and must be re-requested.
+const MAX_OTP_ATTEMPTS = 5;
 
 
 export async function sendOtp(req: Request, res: Response) {
     try {
         const { email } = req.body;
 
+
         const existUser = await UserModel.findOne({ email })
 
         if (existUser) {
-            return res.json({ message: "Uesr already exit with that email " });
+            return res.json({ message: "User already exists with that email", success: false });
+        }
+
+        const exitingOtp = await EmailOtpModel.findOne({ email })
+
+        if (exitingOtp) {
+            return res.json({ message: "OTP already to sent to " + email, success: false });
+
         }
         const otp = crypto.randomInt(100000, 999999).toString();
+
+        await sendTemplatedEmail(
+            email,
+            "Your ExamPrep AI verification code",
+            "otp",
+            {
+                heading: "Verify your email",
+                intro:
+                    "Welcome to ExamPrep AI! Use the verification code below to confirm your email address and finish setting up your account.",
+                otp,
+                expiresMinutes: 5,
+            },
+            `Your ExamPrep AI verification code is ${otp}. It expires in 5 minutes.`,
+        );
+
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        const hashedOtp = await bcrypt.hash(otp, 10);
 
         await EmailOtpModel.findOneAndUpdate(
             { email },
-            { otp, expiresAt, verified: false },
+            { otp: hashedOtp, expiresAt, verified: false, attempts: 0 },
             { upsert: true }
         );
 
-        await sendEmail(email, "Email Verification OTP", `Your OTP is: ${otp}`);
-
-        res.json({ message: "OTP sent to email" });
+        res.json({ message: "OTP sent to email", success: true });
     } catch (error: any) {
-        console.log(error)
-        res.send({ message: error.message })
+        res.send({ message: error.message, success: false });
     }
 }
 
@@ -41,9 +66,25 @@ export async function sendOtp(req: Request, res: Response) {
 export async function verifyOtp(req: Request, res: Response) {
     const { email, otp } = req.body;
 
-    const record = await EmailOtpModel.findOne({ email, otp });
+    // Look up by email only (never put the user-supplied otp in the query) and
+    // compare the hash, so the code can't be probed via NoSQL operators.
+    const record = await EmailOtpModel.findOne({ email });
 
     if (!record || record.expiresAt < new Date()) {
+        return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    if (record.attempts >= MAX_OTP_ATTEMPTS) {
+        await EmailOtpModel.deleteOne({ _id: record._id });
+        return res
+            .status(429)
+            .json({ message: "Too many incorrect attempts. Please request a new code." });
+    }
+
+    const isMatch = await bcrypt.compare(otp, record.otp);
+    if (!isMatch) {
+        record.attempts += 1;
+        await record.save();
         return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
@@ -105,15 +146,15 @@ export async function loginUser(req: Request, res: Response) {
 
         res.cookie("token", token, {
             httpOnly: true,
-            secure: true,
-            sameSite: "none",
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
 
         res.json({
             message: "Login successful",
-            succes: true
+            success: true
         });
     } catch (err: any) {
         res.status(401).json({ message: err.message });
@@ -124,8 +165,8 @@ export async function loginUser(req: Request, res: Response) {
 export const logoutUser = (req: Request, res: Response) => {
     res.clearCookie("token", {
         httpOnly: true,
-        secure: true,
-        sameSite: "none",
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     });
 
     res.status(200).json({
@@ -149,17 +190,26 @@ export async function forgotPassword(req: Request, res: Response) {
 
     const otp = crypto.randomInt(100000, 999999).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const hashedOtp = await bcrypt.hash(otp, 10);
 
     await PasswordResetOtpModel.findOneAndUpdate(
         { email },
-        { otp, expiresAt, verified: false },
+        { otp: hashedOtp, expiresAt, verified: false, attempts: 0 },
         { upsert: true }
     );
 
-    await sendEmail(
+    await sendTemplatedEmail(
         email,
-        "Password Reset OTP",
-        `Your password reset OTP is: ${otp}`
+        "Your ExamPrep AI password reset code",
+        "otp",
+        {
+            heading: "Reset your password",
+            intro:
+                "We received a request to reset your ExamPrep AI password. Use the code below to continue.",
+            otp,
+            expiresMinutes: 5,
+        },
+        `Your ExamPrep AI password reset code is ${otp}. It expires in 5 minutes.`,
     );
 
     res.json({
@@ -172,9 +222,27 @@ export async function forgotPassword(req: Request, res: Response) {
 export async function verifyResetOtp(req: Request, res: Response) {
     const { email, otp } = req.body;
 
-    const record = await PasswordResetOtpModel.findOne({ email, otp });
+    const record = await PasswordResetOtpModel.findOne({ email });
 
     if (!record || record.expiresAt < new Date()) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid or expired OTP",
+        });
+    }
+
+    if (record.attempts >= MAX_OTP_ATTEMPTS) {
+        await PasswordResetOtpModel.deleteOne({ _id: record._id });
+        return res.status(429).json({
+            success: false,
+            message: "Too many incorrect attempts. Please request a new code.",
+        });
+    }
+
+    const isMatch = await bcrypt.compare(otp, record.otp);
+    if (!isMatch) {
+        record.attempts += 1;
+        await record.save();
         return res.status(400).json({
             success: false,
             message: "Invalid or expired OTP",
@@ -198,11 +266,18 @@ export async function resetPassword(req: Request, res: Response) {
 
     const record = await PasswordResetOtpModel.findOne({
         email,
-        otp,
         verified: true,
     });
 
     if (!record || record.expiresAt < new Date()) {
+        return res.status(400).json({
+            success: false,
+            message: "OTP verification required",
+        });
+    }
+
+    const isMatch = await bcrypt.compare(otp, record.otp);
+    if (!isMatch) {
         return res.status(400).json({
             success: false,
             message: "OTP verification required",
@@ -222,4 +297,85 @@ export async function resetPassword(req: Request, res: Response) {
         success: true,
         message: "Password reset successfully",
     });
+}
+
+
+
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+
+export const googleAuthController = async (req: Request, res: Response) => {
+
+    try {
+        const { credential } = req.body;
+        if (!credential) {
+            return res.status(400).json({ message: "Google credential is required" });
+        }
+
+        // Verify the Google token
+        const ticket = await googleClient.verifyIdToken({
+            idToken: credential,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+
+        const payload = ticket.getPayload();
+        if (!payload || !payload.email) {
+            return res.status(400).json({ message: "Invalid Google token" });
+        }
+
+        const { sub: googleId, email, name, picture } = payload;
+
+        // Check if user exists by googleId OR email
+        let user = await UserModel.findOne({
+            $or: [{ googleId }, { email }],
+        });
+
+        if (user) {
+            // Existing user — link Google if they signed up via email before
+            if (!user.googleId) {
+                user.googleId = googleId;
+                user.provider = AuthProvider.GOOGLE;
+                if (picture) user.avatar = picture;
+                await user.save();
+            }
+        } else {
+            // Brand new user
+            user = await UserModel.create({
+                name: name || "Google User",
+                email,
+                googleId,
+                avatar: picture,
+                provider: AuthProvider.GOOGLE,
+                // no password — that's fine now
+            });
+        }
+
+        // Issue your normal JWT
+        const token = jwt.sign(
+            { userId: user._id, role: user.role },
+            process.env.JWT_SECRET!,
+            { expiresIn: "7d" }
+        );
+
+
+        res.cookie("token", token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+
+
+        res.json({
+            message: "Login successful",
+            success: true
+        });
+    } catch (error) {
+        console.error("Google auth error:", error);
+        res.status(500).json({ message: "Google authentication failed" });
+    }
+
+
+
 }

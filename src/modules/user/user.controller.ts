@@ -21,7 +21,7 @@ export async function newsLetter(req: any, res: Response) {
 
 
     if (result) {
-        res.json({ message: "Already subscribe" });
+        return res.json({ message: "Already subscribe" });
     }
     await NewsLetterModel.create({
         email

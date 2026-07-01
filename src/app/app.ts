@@ -5,11 +5,15 @@ import morgan from "morgan";
 import { routes } from "./routes";
 import cookieParser from "cookie-parser";
 import { errorHandler } from "../common/middlewares/errorHandler";
-import { errorHandlerAiRoute } from '../modules/ai/error.middleware';
+import { globalLimiter } from "../common/middlewares/rateLimit";
 import { env } from '../config/env';
 
 export function createApp() {
   const app = express();
+
+  // Trust the first proxy hop so req.ip is the real client (needed for correct
+  // rate-limiting and secure cookies behind a reverse proxy / load balancer).
+  app.set("trust proxy", 1);
 
   // security + basics
   app.use(helmet());
@@ -27,6 +31,8 @@ export function createApp() {
   // cookie
   app.use(cookieParser());
 
+  // app-wide rate-limit backstop (health checks are exempt)
+  app.use(globalLimiter);
 
   // routes
   app.use("/api/v1", routes);
@@ -34,7 +40,6 @@ export function createApp() {
   // error handling (last)
   app.use(errorHandler);
 
-  app.use(errorHandlerAiRoute);
 
   return app;
 }

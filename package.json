@@ -4,8 +4,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js"
+    "build": "tsc && cp -r src/Email-templates dist/Email-templates",
+    "start": "node dist/server.js",
+    "import:handouts": "node scripts/importHandouts.js"
   },
   "keywords": [],
   "author": "",
@@ -14,12 +15,16 @@
   "dependencies": {
     "@qdrant/qdrant-js": "^1.16.2",
     "@types/cookie-parser": "^1.4.10",
+    "@types/ejs": "^3.1.5",
     "@types/pdfjs-dist": "^2.10.377",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "ejs": "^6.0.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "google-auth-library": "^10.6.2",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.1",

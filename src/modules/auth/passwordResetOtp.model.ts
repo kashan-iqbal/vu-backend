@@ -5,6 +5,7 @@ export interface IPasswordResetOtp extends Document {
     otp: string;
     expiresAt: Date;
     verified: boolean;
+    attempts: number;
 }
 
 const PasswordResetOtpSchema = new Schema<IPasswordResetOtp>(
@@ -27,9 +28,18 @@ const PasswordResetOtpSchema = new Schema<IPasswordResetOtp>(
             type: Boolean,
             default: false,
         },
+
+        // Wrong-guess counter — used to lock out OTP brute-force.
+        attempts: {
+            type: Number,
+            default: 0,
+        },
     },
     { timestamps: true }
 );
+
+// TTL index: Mongo auto-deletes the document once `expiresAt` passes.
+PasswordResetOtpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const PasswordResetOtpModel =
     mongoose.models.PasswordResetOtp ||

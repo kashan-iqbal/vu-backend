@@ -1,31 +1,30 @@
 import mongoose, { Document, Schema } from "mongoose";
 
-/**
- * User Roles
- * Extend later: admin, vendor, finance, etc
- */
 export enum UserRole {
     USER = "user",
     ADMIN = "admin",
 }
 
-/**
- * User Interface (TypeScript)
- */
+export enum AuthProvider {
+    LOCAL = "local",
+    GOOGLE = "google",
+}
+
 export interface IUser extends Document {
+    _id: mongoose.Types.ObjectId;
     name: string;
     email: string;
-    password: string;
+    password?: string;
     role: UserRole;
     isActive: boolean;
-    phoneNo: Number;
+    phoneNo?: number;
+    googleId?: string;
+    avatar?: string;
+    provider: AuthProvider;
     createdAt: Date;
     updatedAt: Date;
 }
 
-/**
- * User Schema
- */
 const UserSchema = new Schema<IUser>(
     {
         name: {
@@ -35,7 +34,6 @@ const UserSchema = new Schema<IUser>(
             minlength: 2,
             maxlength: 100,
         },
-
         email: {
             type: String,
             required: true,
@@ -44,14 +42,12 @@ const UserSchema = new Schema<IUser>(
             trim: true,
             index: true,
         },
-
         password: {
             type: String,
-            required: true,
             minlength: 6,
             select: false,
+            // NOT required anymore — Google users won't have one
         },
-
         role: {
             type: String,
             enum: Object.values(UserRole),
@@ -59,23 +55,30 @@ const UserSchema = new Schema<IUser>(
         },
         phoneNo: {
             type: Number,
-            length: 11,
-
-
         },
         isActive: {
             type: Boolean,
             default: true,
         },
+        googleId: {
+            type: String,
+            unique: true,
+            sparse: true, // allows multiple null values
+        },
+        avatar: {
+            type: String,
+        },
+        provider: {
+            type: String,
+            enum: Object.values(AuthProvider),
+            default: AuthProvider.LOCAL,
+        },
     },
     {
-        timestamps: true, // adds createdAt & updatedAt
+        timestamps: true,
         versionKey: false,
     }
 );
 
-/**
- * Model Export
- */
 export const UserModel =
     mongoose.models.User || mongoose.model<IUser>("User", UserSchema);
