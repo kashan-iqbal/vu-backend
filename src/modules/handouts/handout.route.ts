@@ -15,7 +15,7 @@ export const handoutRouter = Router();
 handoutRouter.get("/", authGuard, listHandoutsController);
 
 // Single handout by course code + exam type
-handoutRouter.get("/:code/:examType", authGuard, getSingleHandout);
+handoutRouter.get("/:code/:examType", getSingleHandout);
 
 // Upsert a handout (admin / bulk md-import script) — gated by the x-api-key
 // shared secret since it's an unauthenticated content-write endpoint.

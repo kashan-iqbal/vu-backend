@@ -16,7 +16,7 @@ export async function SubmitQuizResult(req: Request, res: Response) {
             return res.status(400).json({ message: "No quiz data provided" });
         }
 
-        const wrongAnswers = QuizService.filterWrongAnswers(data);
+        const [wrongAnswers, correctAnswers] = QuizService.filterWrongAnswers(data);
 
         if (wrongAnswers.length === 0) {
             return res.status(200).json({
@@ -25,7 +25,7 @@ export async function SubmitQuizResult(req: Request, res: Response) {
             });
         }
 
-        await QuizService.saveWrongAnswers(userId, wrongAnswers);
+        await QuizService.saveWrongAnswers(userId, wrongAnswers, correctAnswers);
 
         return res.status(200).json({
             message: "Quiz result submitted successfully",

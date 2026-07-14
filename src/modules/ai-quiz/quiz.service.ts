@@ -16,12 +16,18 @@ interface QuizWithSelection {
 
 }
 
-export function filterWrongAnswers(data: QuizWithSelection[]): QuizWithSelection[] {
-    return data.filter((quiz) => quiz.selectedOption !== quiz.correctAnswer);
+export function filterWrongAnswers(data: QuizWithSelection[]): [QuizWithSelection[], QuizWithSelection[]] {
+    const wrongAnswers = data.filter((quiz) => quiz.selectedOption !== quiz.correctAnswer);
+    const correctAnswers = data.filter((quiz) => quiz.selectedOption === quiz.correctAnswer);
+
+    return [wrongAnswers, correctAnswers];
 }
 
 
-export async function saveWrongAnswers(userId: string, wrongAnswers: QuizWithSelection[]): Promise<void> {
+export async function saveWrongAnswers(userId: string, wrongAnswers: QuizWithSelection[], correctAnswers: QuizWithSelection[]): Promise<void> {
+    const topic = [...new Set(wrongAnswers.map((quiz) => quiz.topic_name))];
+    await WrongAnswerModel.deleteMany({ userId, topic_name: { $in: topic } });
+
     const bulkOps = wrongAnswers.map((quiz) => ({
         updateOne: {
             filter: { userId, quizId: quiz.id },
