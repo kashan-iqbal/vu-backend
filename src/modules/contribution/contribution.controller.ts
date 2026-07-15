@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { isR2Configured } from "../../config/r2";
 import * as contributionService from "./contribution.service";
 import { contributionCodeSchema } from "./contribution.schema";
+import { isAllowedCode } from "./contribution.codes";
 
 // GET /contributions/codes — the course codes that already have a PDF.
 export const getCodes = async (_req: Request, res: Response) => {
@@ -15,16 +16,20 @@ export const getCodes = async (_req: Request, res: Response) => {
 };
 
 // POST /contributions/:code — store one PDF per course code (first upload wins).
+// Public: no login required; the uploader self-identifies with name + phone.
 export const uploadContribution = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId?.toString();
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
-
     const parsedCode = contributionCodeSchema.safeParse(req.params.code);
     if (!parsedCode.success) {
       return res.status(400).json({ message: "Invalid course code" });
     }
     const code = parsedCode.data;
+
+    // Anyone can call this, so only the courses we actually want PDFs for may be
+    // written — otherwise a bot could mint an object for any well-formed code.
+    if (!isAllowedCode(code)) {
+      return res.status(400).json({ message: "Unknown course code" });
+    }
 
     if (!isR2Configured()) {
       return res
@@ -54,7 +59,8 @@ export const uploadContribution = async (req: Request, res: Response) => {
     try {
       await contributionService.createContribution({
         code,
-        user: userId,
+        uploaderName: req.body.name,
+        uploaderPhone: req.body.phone,
         uniqueId,
         r2Key,
         originalName: req.file.originalname,

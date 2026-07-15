@@ -2,7 +2,10 @@ import mongoose, { Document, Schema } from "mongoose";
 
 export interface IContribution extends Document {
   code: string;
-  user: mongoose.Types.ObjectId;
+  uploaderName: string;
+  uploaderPhone: string;
+  /** Legacy: set only by uploads made back when contributing required a login. */
+  user?: mongoose.Types.ObjectId;
   uniqueId: string;
   r2Key: string;
   originalName: string;
@@ -25,12 +28,25 @@ const ContributionSchema = new Schema<IContribution>(
       trim: true,
       unique: true,
     },
-    // Who contributed it. Paired with `uniqueId` this is how an object sitting
-    // in the bucket is traced back to a real user.
+    // Who contributed it. Uploads are anonymous, so this is self-reported and
+    // unverified — paired with `uniqueId` it's how an object in the bucket is
+    // attributed to a person, but it proves nothing on its own.
+    uploaderName: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 100,
+    },
+    uploaderPhone: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    // Legacy: populated only by the pre-public uploads that required a login.
+    // Kept (optional) so those existing records still read back intact.
     user: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      required: true,
     },
     // uuid v4 embedded in the R2 object key, so the stored file name itself
     // resolves to exactly one record.

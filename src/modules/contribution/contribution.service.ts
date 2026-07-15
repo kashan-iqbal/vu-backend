@@ -45,7 +45,8 @@ export async function deleteObjectFromR2(key: string): Promise<void> {
 
 export async function createContribution(doc: {
   code: string;
-  user: string;
+  uploaderName: string;
+  uploaderPhone: string;
   uniqueId: string;
   r2Key: string;
   originalName: string;
