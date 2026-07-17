@@ -1,0 +1,61 @@
+name: Deploy to EC2
+
+# On every push to main: build the app on the runner, copy the compiled output
+# to the EC2 host over SSH, install production dependencies, and reload PM2.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Never run two deploys at once.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build & deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Build on the runner (needs devDeps like typescript). Produces dist/,
+      # including dist/Email-templates via the build script.
+      - name: Install & build
+        run: |
+          npm ci
+          npm run build
+
+      # Ship only what runs in production — no node_modules, no source, no dev deps.
+      - name: Copy build to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_SSH_PORT || 22 }}
+          source: "dist/,package.json,package-lock.json,ecosystem.config.js"
+          target: ${{ secrets.APP_DIR }}
+          overwrite: true
+
+      # Install prod deps on the server, then zero-downtime reload via PM2.
+      - name: Install prod deps & reload PM2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.APP_DIR }}"
+            npm ci --omit=dev
+            pm2 reload ecosystem.config.js --update-env || pm2 start ecosystem.config.js
+            pm2 save
