@@ -71,5 +71,5 @@ jobs:
             set -euo pipefail
             cd "${{ secrets.APP_DIR }}"
             npm ci --omit=dev
-            pm2 reload ecosystem.config.js --update-env || pm2 start ecosystem.config.js
+            pm2 restart backend --update-env || pm2 start ecosystem.config.js
             pm2 save
