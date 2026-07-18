@@ -69,6 +69,9 @@ jobs:
           port: ${{ secrets.EC2_SSH_PORT || 22 }}
           script: |
             set -euo pipefail
+            # Non-interactive SSH doesn't load PATH; source nvm so node/npm/pm2 resolve.
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
             cd "${{ secrets.APP_DIR }}"
             npm ci --omit=dev
             pm2 restart backend --update-env || pm2 start ecosystem.config.js
