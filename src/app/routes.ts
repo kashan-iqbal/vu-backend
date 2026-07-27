@@ -7,6 +7,7 @@ import { quizRouter } from '../modules/ai-quiz/quiz.route';
 import { topicReviewRouter } from '../modules/topic-review/topicReview.route';
 import { pastQuizRouter } from "../modules/pastQuiz/pastQuiz.route";
 import { contributionRouter } from "../modules/contribution/contribution.route";
+import { feedbackRouter } from "../modules/feedback/feedback.route";
 
 export const routes = Router();
 
@@ -23,6 +24,8 @@ routes.use("/topic-review", topicReviewRouter);
 routes.use("/pastquiz", pastQuizRouter);
 
 routes.use("/contributions", contributionRouter);
+
+routes.use("/feedback", feedbackRouter);
 
 routes.use("/handout", handoutRouter)
 

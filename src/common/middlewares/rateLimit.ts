@@ -32,6 +32,16 @@ export const uploadLimiter = rateLimit({
   message: { message: "Too many uploads. Please try again later." },
 });
 
+// Feedback submissions — enough headroom for a genuine user (rate + a couple of
+// follow-ups) while capping spam.
+export const feedbackLimiter = rateLimit({
+  windowMs: FIFTEEN_MINUTES,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many submissions. Please try again later." },
+});
+
 // App-wide backstop for everything else. Health checks are exempt so uptime
 // monitors / load balancers don't get throttled.
 export const globalLimiter = rateLimit({
