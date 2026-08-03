@@ -33,20 +33,6 @@ jobs:
           npm ci
           npm run build
 
-      # TEMP diagnostic: prints only lengths, never secret values. Remove once green.
-      - name: Verify secrets are present
-        run: |
-          echo "EC2_SSH_KEY length : ${#SSH_KEY}   (0 = empty/not visible to this job)"
-          echo "EC2_HOST set       : ${HOST:+yes}"
-          echo "EC2_SSH_USER       : ${USER_:+yes}"
-          echo "APP_DIR            : ${APP_DIR:+yes}"
-          echo "key first line     : $(printf '%s' "$SSH_KEY" | head -n1)"
-        env:
-          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          HOST: ${{ secrets.EC2_HOST }}
-          USER_: ${{ secrets.EC2_SSH_USER }}
-          APP_DIR: ${{ secrets.APP_DIR }}
-
       # Ship only what runs in production — no node_modules, no source, no dev deps.
       - name: Copy build to EC2
         uses: appleboy/scp-action@v0.1.7

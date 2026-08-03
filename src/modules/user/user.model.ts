@@ -80,5 +80,8 @@ const UserSchema = new Schema<IUser>(
     }
 );
 
+// Powers the admin dashboard's signups-per-day trend query.
+UserSchema.index({ createdAt: 1 });
+
 export const UserModel =
     mongoose.models.User || mongoose.model<IUser>("User", UserSchema);

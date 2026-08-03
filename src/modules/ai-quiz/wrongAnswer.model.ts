@@ -46,5 +46,7 @@ const WrongAnswerSchema = new Schema<IWrongAnswer>(
 );
 
 WrongAnswerSchema.index({ userId: 1, quizId: 1 }, { unique: true });
+// Powers the admin dashboard's filtered wrong-answers browsing.
+WrongAnswerSchema.index({ code: 1, type: 1 });
 
 export const WrongAnswerModel = model<IWrongAnswer>("WrongAnswer", WrongAnswerSchema);

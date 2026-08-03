@@ -48,6 +48,9 @@ const FeedbackSchema = new Schema<IFeedback>(
   },
 );
 
+// Powers the admin dashboard's feedback-per-day trend query.
+FeedbackSchema.index({ createdAt: 1 });
+
 export const FeedbackModel =
   mongoose.models.Feedback ||
   mongoose.model<IFeedback>("Feedback", FeedbackSchema, "feedback");

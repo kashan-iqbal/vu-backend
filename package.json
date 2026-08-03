@@ -8,7 +8,8 @@
     "start": "node dist/server.js",
     "import:handouts": "node scripts/importHandouts.js",
     "import:pastquiz": "ts-node scripts/importPastQuiz.ts",
-    "import:pastquiz:batch": "ts-node scripts/importPastQuizBatch.ts"
+    "import:pastquiz:batch": "ts-node scripts/importPastQuizBatch.ts",
+    "migrate:contribution-status": "ts-node scripts/migrateContributionStatus.ts"
   },
   "keywords": [],
   "author": "",

@@ -6,7 +6,7 @@ import { NewsLetterModel } from "./newletter.model";
 
 export async function getProfile(req: any, res: Response) {
 
-    const user = await UserModel.findOne({ _id: req.user.userId }).select("-isActive -role -updatedAt ")
+    const user = await UserModel.findOne({ _id: req.user.userId }).select("-updatedAt")
 
     res.json({ user });
 }
