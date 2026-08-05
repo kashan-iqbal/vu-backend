@@ -50,6 +50,14 @@ export const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many requests. Please try again later." },
-  skip: (req) => req.path === "/api/v1/health",
-
+  // Exempt:
+  //  - the health check (uptime monitors / load balancers)
+  //  - public, read-only handout GETs. The frontend's SSG build + sitemap fetch
+  //    ~282 handout pages in a single burst from one build IP; at limit 150 the
+  //    overflow was 429'd and those pages froze as noindex "not found" pages.
+  //    These endpoints expose no user data and are safe to serve unthrottled.
+  //    The POST /handout upsert (write) stays limited — it's not a GET.
+  skip: (req) =>
+    req.path === "/api/v1/health" ||
+    (req.method === "GET" && req.path.startsWith("/api/v1/handout")),
 });
