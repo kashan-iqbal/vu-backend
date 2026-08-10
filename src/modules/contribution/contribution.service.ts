@@ -61,13 +61,18 @@ export async function createContribution(doc: {
   return ContributionModel.create(doc);
 }
 
-// Admin review: keep the file, just mark it reviewed.
+// Admin review: keep the file, just mark it reviewed. Uses .save() (not
+// findByIdAndUpdate) so the pre-save hook re-syncs codeSlot — that matters
+// for records created before this feature shipped, which have no codeSlot
+// yet: approving one now retroactively locks its course code, the same as
+// it would if the bulk migration had already backfilled it.
 export async function approveContribution(id: string) {
-  return ContributionModel.findByIdAndUpdate(
-    id,
-    { status: ContributionStatus.APPROVED },
-    { new: true },
-  ).lean();
+  const doc = await ContributionModel.findById(id);
+  if (!doc) return null;
+
+  doc.status = ContributionStatus.APPROVED;
+  await doc.save();
+  return doc.toObject();
 }
 
 // Admin review: delete the R2 object to free the storage, but keep the DB

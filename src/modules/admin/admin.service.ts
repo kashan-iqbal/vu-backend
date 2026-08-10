@@ -146,14 +146,36 @@ export async function listContributors(query: Query) {
           _id: "$uploaderPhone",
           name: { $first: "$uploaderName" },
           total: { $sum: 1 },
+          // Docs from before this feature shipped have no `status` field at
+          // all (Mongoose's schema default only applies to new documents,
+          // not ones already in the DB) — $ifNull treats those as pending
+          // rather than silently dropping out of every bucket.
           approved: {
-            $sum: { $cond: [{ $eq: ["$status", ContributionStatus.APPROVED] }, 1, 0] },
+            $sum: {
+              $cond: [
+                { $eq: [{ $ifNull: ["$status", ContributionStatus.PENDING] }, ContributionStatus.APPROVED] },
+                1,
+                0,
+              ],
+            },
           },
           rejected: {
-            $sum: { $cond: [{ $eq: ["$status", ContributionStatus.REJECTED] }, 1, 0] },
+            $sum: {
+              $cond: [
+                { $eq: [{ $ifNull: ["$status", ContributionStatus.PENDING] }, ContributionStatus.REJECTED] },
+                1,
+                0,
+              ],
+            },
           },
           pending: {
-            $sum: { $cond: [{ $eq: ["$status", ContributionStatus.PENDING] }, 1, 0] },
+            $sum: {
+              $cond: [
+                { $eq: [{ $ifNull: ["$status", ContributionStatus.PENDING] }, ContributionStatus.PENDING] },
+                1,
+                0,
+              ],
+            },
           },
         },
       },
@@ -181,7 +203,9 @@ export async function getContributorDetail(phone: string) {
   const summary = uploads.reduce(
     (acc, u) => {
       acc.total += 1;
-      acc[u.status as ContributionStatus] += 1;
+      // Same as above: docs predating this feature have no status field.
+      const status = (u.status as ContributionStatus | undefined) ?? ContributionStatus.PENDING;
+      acc[status] += 1;
       return acc;
     },
     { total: 0, pending: 0, approved: 0, rejected: 0 },
