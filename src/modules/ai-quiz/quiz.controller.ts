@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import * as QuizService from "./quiz.service";
 import { UserModel } from "../user/user.model";
 import { sendEmail } from "../../common/utils/sendEmail";
+import { recordTopicStats } from "../readiness/readiness.service";
 
 export async function SubmitQuizResult(req: Request, res: Response) {
     try {
@@ -14,6 +15,20 @@ export async function SubmitQuizResult(req: Request, res: Response) {
 
         if (!Array.isArray(data) || data.length === 0) {
             return res.status(400).json({ message: "No quiz data provided" });
+        }
+
+        // Additive: accumulate per-topic attempts/corrects for the readiness
+        // engine. Runs for EVERY submission (including perfect scores, which
+        // otherwise persist nothing) and is wrapped so it can never affect the
+        // existing quiz-submit response. Awaited so the results screen's
+        // readiness card reads fresh numbers.
+        try {
+            const first = data[0];
+            if (first?.code && first?.type) {
+                await recordTopicStats(userId, String(first.code), String(first.type), data);
+            }
+        } catch (statErr) {
+            console.error("recordTopicStats failed (non-fatal):", statErr);
         }
 
         const [wrongAnswers, correctAnswers] = QuizService.filterWrongAnswers(data);

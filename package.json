@@ -6,6 +6,8 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc && cp -r src/Email-templates dist/Email-templates",
     "start": "node dist/server.js",
+    "test": "vitest run",
+    "seed:topic-weights": "ts-node scripts/seedTopicWeights.ts",
     "import:handouts": "node scripts/importHandouts.js",
     "import:pastquiz": "ts-node scripts/importPastQuiz.ts",
     "import:pastquiz:batch": "ts-node scripts/importPastQuizBatch.ts",
@@ -53,6 +55,7 @@
     "@types/uuid": "^10.0.0",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   }
 }
