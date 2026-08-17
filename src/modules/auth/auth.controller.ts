@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { EmailOtpModel } from "./emailOtp.model";
 import { UserModel, AuthProvider } from "../user/user.model";
-import { sendTemplatedEmail } from "../../common/utils/sendEmail";
+import { sendTemplatedEmail, sendWelcomeEmail } from "../../common/utils/sendEmail";
 import { PasswordResetOtpModel } from "./passwordResetOtp.model";
 import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
 
@@ -118,6 +118,11 @@ export async function registerUser(req: Request, res: Response) {
     });
 
     await EmailOtpModel.deleteOne({ email });
+
+    // Welcome email — fire-and-forget so a mail hiccup never fails registration.
+    sendWelcomeEmail(email, name).catch((err) =>
+        console.error("Welcome email failed:", err),
+    );
 
     res.status(201).json({ message: "User registered successfully", success: true });
 }
@@ -349,6 +354,11 @@ export const googleAuthController = async (req: Request, res: Response) => {
                 provider: AuthProvider.GOOGLE,
                 // no password — that's fine now
             });
+
+            // Welcome email — fire-and-forget so mail never blocks Google sign-up.
+            sendWelcomeEmail(user.email, user.name).catch((err) =>
+                console.error("Welcome email failed:", err),
+            );
         }
 
         // Issue your normal JWT

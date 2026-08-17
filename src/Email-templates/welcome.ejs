@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>Welcome to <%= brandName %></title>
+</head>
+<body style="margin:0; padding:0; background-color:#eef2f8; font-family:'Segoe UI', 'Helvetica Neue', Arial, sans-serif;">
+  <!-- preheader (hidden) -->
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">
+    Your <%= brandName %> account is ready — here's how to start acing your VU exams.
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eef2f8; padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background-color:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 6px 24px rgba(15,58,125,0.10);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:<%= primary %>; background-image:linear-gradient(135deg, <%= primary %> 0%, <%= accent %> 100%); padding:34px 30px; text-align:center;">
+              <div style="font-size:26px; font-weight:700; color:#ffffff; letter-spacing:0.5px;"><%= brandName %></div>
+              <div style="font-size:13px; color:#dbe6f5; margin-top:6px;"><%= tagline %></div>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:36px 36px 8px;">
+              <h1 style="margin:0 0 12px; font-size:22px; font-weight:700; color:<%= primary %>;">
+                Welcome aboard, <%= locals.firstName || "there" %>! 🎉
+              </h1>
+              <p style="margin:0; font-size:15px; line-height:1.7; color:#4a5a6a;">
+                Your account is ready. <%= brandName %> is your independent, AI-powered
+                study companion for Virtual University — built to help you revise faster,
+                practise smarter, and walk into every exam prepared.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Feature list -->
+          <tr>
+            <td style="padding:22px 36px 8px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <% [
+                  ["Solve real past-paper MCQs", "Practise actual past questions with instant AI feedback and explanations."],
+                  ["Concise AI handouts", "Revise the whole course from short, exam-focused summaries."],
+                  ["Know your readiness", "Get an exam-readiness score and an \"Exam in N hours\" crash plan."],
+                  ["GDB & assignment help", "Draft a solid starting framework for discussions and assignments."]
+                ].forEach(function(item) { %>
+                <tr>
+                  <td style="padding:8px 0; vertical-align:top; width:28px;">
+                    <span style="display:inline-block; width:20px; height:20px; line-height:20px; text-align:center; border-radius:50%; background-color:<%= accent %>; color:#ffffff; font-size:12px; font-weight:700;">&#10003;</span>
+                  </td>
+                  <td style="padding:8px 0; font-size:14px; line-height:1.5; color:#4a5a6a;">
+                    <strong style="color:<%= primary %>;"><%= item[0] %></strong><br />
+                    <%= item[1] %>
+                  </td>
+                </tr>
+                <% }); %>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA button -->
+          <tr>
+            <td style="padding:24px 36px 8px; text-align:center;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
+                <tr>
+                  <td style="border-radius:10px; background-color:<%= primary %>; background-image:linear-gradient(135deg, <%= primary %> 0%, <%= accent %> 100%);">
+                    <a href="<%= locals.appUrl || appUrl %>/course" target="_blank"
+                       style="display:inline-block; padding:14px 34px; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none; border-radius:10px;">
+                      Start preparing &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Trust note -->
+          <tr>
+            <td style="padding:18px 36px 32px;">
+              <p style="margin:0; font-size:13px; line-height:1.6; color:#7a8a9a; text-align:center;">
+                An independent study tool for VU students — not affiliated with Virtual University.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f7f9fc; border-top:1px solid #e8ecf2; padding:22px 30px; text-align:center;">
+              <p style="margin:0 0 4px; font-size:12px; color:#9aa7b5;">
+                Questions? We're here —
+                <a href="mailto:<%= supportEmail %>" style="color:<%= accent %>; text-decoration:none;"><%= supportEmail %></a>
+              </p>
+              <p style="margin:0; font-size:12px; color:#aab4c0;">
+                &copy; <%= year %> <%= brandName %>. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
