@@ -2,7 +2,6 @@ import { createApp } from "./app/app";
 import { env } from "./config/env";
 import { connectDB } from "./config/connectDB";
 
-
 async function bootstrap() {
   await connectDB();
 
@@ -14,6 +13,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-
-
-

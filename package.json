@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc && cp -r src/Email-templates dist/Email-templates",
+    "build": "tsc && node -e \"require('fs').cpSync('src/Email-templates','dist/Email-templates',{recursive:true})\"",
     "start": "node dist/server.js",
     "test": "vitest run",
     "seed:topic-weights": "ts-node scripts/seedTopicWeights.ts",

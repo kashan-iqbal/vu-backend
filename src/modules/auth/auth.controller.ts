@@ -136,6 +136,13 @@ export async function loginUser(req: Request, res: Response) {
         const user = await UserModel.findOne({ email }).select("+password");
         if (!user) throw new Error("Invalid credentials");
 
+        // Google accounts have no password. Say so, instead of letting
+        // bcrypt.compare(password, undefined) throw its internal
+        // "Illegal arguments" message straight at the user.
+        if (!user.password) {
+            throw new Error("This account uses Google Sign-In. Please continue with Google.");
+        }
+
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) throw new Error("Invalid credentials");
 
