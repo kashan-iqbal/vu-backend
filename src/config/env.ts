@@ -1,9 +1,19 @@
 import 'dotenv/config';
 import { z } from "zod";
 
+// Hosting dashboards happily store NODE_ENV as `"production"` (quotes included),
+// `production ` (trailing space from a paste), or an empty string. None of those
+// are `undefined`, so a plain .default() never fires and boot dies on a Zod enum
+// error that doesn't even print the offending value. Normalise before validating.
+const nodeEnv = (raw: unknown) => {
+  if (typeof raw !== "string") return "development";
+  const cleaned = raw.trim().replace(/^["']+|["']+$/g, "").toLowerCase();
+  return cleaned === "" ? "development" : cleaned;
+};
+
 const EnvSchema = z.object({
   PORT: z.coerce.number().default(3000),
-  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  NODE_ENV: z.preprocess(nodeEnv, z.enum(["development", "production", "test"])),
   DATABASE_URL: z.string().url(),
   DEEPSEEK_API_KEY: z.string().optional(),
   FRONTEND_URL: z.string().url(),
@@ -22,4 +32,19 @@ const EnvSchema = z.object({
   R2_PUBLIC_URL: z.union([z.string().url(), z.literal("")]).optional(),
 });
 
-export const env = EnvSchema.parse(process.env);
+const parsed = EnvSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  // Report variable names and reasons only - never the values, which hold the
+  // DB URL, JWT secret and R2 keys.
+  console.error("Invalid environment configuration:");
+  for (const issue of parsed.error.issues) {
+    const key = issue.path.join(".") || "(root)";
+    const received =
+      key === "NODE_ENV" ? ` (received: ${JSON.stringify(process.env.NODE_ENV)})` : "";
+    console.error(`  ${key}: ${issue.message}${received}`);
+  }
+  process.exit(1);
+}
+
+export const env = parsed.data;
