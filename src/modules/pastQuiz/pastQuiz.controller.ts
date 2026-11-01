@@ -1,11 +1,18 @@
 import { Request, Response } from "express";
 import * as pastQuizService from "./pastQuiz.service";
+import { requestFrontendRebuild } from "../../common/utils/deployHook";
 
 
 
 export const SaveQuiz = async (req: Request, res: Response) => {
   try {
     const result = await pastQuizService.bulkUpsertPastQuiz(req.body);
+
+    // /past-papers pages are statically generated with dynamicParams = false, and
+    // the 5-MCQ count gate means an import can make a NEW pair publishable — so
+    // the URL set changes and the frontend has to rebuild. Debounced.
+    requestFrontendRebuild("pastquiz:bulk-import");
+
     res.status(200).json({ message: "Bulk import successful", ...result });
   } catch (error) {
     res.status(500).json({ message: "Error importing past quizzes", error });

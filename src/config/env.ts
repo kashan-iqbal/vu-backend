@@ -30,6 +30,16 @@ const EnvSchema = z.object({
   // Only needed if the bucket is served publicly and you want readable links.
   // Tolerates an empty value so a blank placeholder in .env doesn't fail boot.
   R2_PUBLIC_URL: z.union([z.string().url(), z.literal("")]).optional(),
+
+  // Vercel Deploy Hook, created in the Vercel dashboard (Project → Settings →
+  // Git → Deploy Hooks). Content writes trigger a frontend rebuild through it,
+  // because the indexable pages are statically generated with
+  // dynamicParams = false and so only learn about new handouts at build time.
+  // OPTIONAL and empty-tolerant on purpose: unset locally and in CI, where
+  // rebuilding is a no-op, so development imports never burn build minutes.
+  VERCEL_DEPLOY_HOOK_URL: z
+    .union([z.string().url(), z.literal("")])
+    .optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

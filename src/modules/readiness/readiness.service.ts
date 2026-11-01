@@ -24,25 +24,32 @@ export interface ReadinessResponse {
   };
 }
 
-// Aggregate a finished quiz into the per-topic tally. Additive and idempotent-ish
-// ($inc), called from the quiz submit path. Attempts count only answered
-// questions (selectedOption >= 0); unanswered/timed-out ones don't skew accuracy.
+// One answered question, already graded BY THE SERVER. This used to take the raw
+// client payload and compare selectedOption against a client-supplied
+// correctAnswer — so the accuracy history the readiness engine runs on was
+// whatever the browser claimed. Grading now happens in quiz.service against the
+// database, and this only tallies the verdict.
+export interface GradedAnswerRow {
+  topic_name: string;
+  /** False for timed-out / skipped questions — they must not skew accuracy. */
+  answered: boolean;
+  correct: boolean;
+}
+
+// Aggregate a finished quiz into the per-topic tally. Additive ($inc), called from
+// the quiz submit path. Attempts count only answered questions.
 export async function recordTopicStats(
   userId: string,
   code: string,
   type: string,
-  answers: Array<{
-    topic_name: string;
-    selectedOption: number;
-    correctAnswer: number;
-  }>,
+  answers: GradedAnswerRow[],
 ): Promise<void> {
   const perTopic = new Map<string, { attempts: number; correct: number }>();
   for (const a of answers) {
-    if (!a?.topic_name || a.selectedOption < 0) continue; // skip unanswered
+    if (!a?.topic_name || !a.answered) continue; // skip unanswered
     const cur = perTopic.get(a.topic_name) ?? { attempts: 0, correct: 0 };
     cur.attempts += 1;
-    if (a.selectedOption === a.correctAnswer) cur.correct += 1;
+    if (a.correct) cur.correct += 1;
     perTopic.set(a.topic_name, cur);
   }
   if (perTopic.size === 0) return;

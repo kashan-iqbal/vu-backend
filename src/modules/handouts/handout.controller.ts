@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { getHandout, listHandoutKeys, upsertHandout } from "./handout.service";
 import { ExamType } from "./handout.model";
+import { requestFrontendRebuild } from "../../common/utils/deployHook";
 
 const VALID_EXAM_TYPES = Object.values(ExamType) as string[];
 
@@ -52,6 +53,13 @@ export async function createHandoutsController(req: Request, res: Response) {
     console.log("createHandout:", { code, examType, contentLength: content.length });
 
     const result = await upsertHandout(code, examType, content);
+
+    // The frontend builds its handout URLs (and now its per-part URLs) at build
+    // time via generateStaticParams + dynamicParams = false, so a new or edited
+    // handout has no page until a rebuild. Debounced, so a bulk import triggers
+    // one build rather than hundreds.
+    requestFrontendRebuild(`handout:${code}/${examType}`);
+
     return res.status(201).json(result);
   } catch (error) {
     console.error("createHandout error:", error);

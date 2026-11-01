@@ -6,6 +6,7 @@ import { routes } from "./routes";
 import cookieParser from "cookie-parser";
 import { errorHandler } from "../common/middlewares/errorHandler";
 import { globalLimiter } from "../common/middlewares/rateLimit";
+import { csrfGuard } from "../common/middlewares/csrf.middleware";
 import { env } from '../config/env';
 
 export function createApp() {
@@ -30,6 +31,11 @@ export function createApp() {
 
   // cookie
   app.use(cookieParser());
+
+  // CSRF: must run AFTER cookieParser (it keys off the session cookie) and before
+  // any route that mutates state. See csrf.middleware.ts for why the session
+  // cookie being SameSite=None makes this necessary.
+  app.use(csrfGuard);
 
   // app-wide rate-limit backstop (health checks are exempt)
   app.use(globalLimiter);
