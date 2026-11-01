@@ -20,6 +20,18 @@ const EnvSchema = z.object({
   // Shared secret guarding admin/script write endpoints (POST /handout).
   HANDOUT_API_KEY: z.string().min(16),
 
+  // Google Sign-In, one OAuth client per platform. The `aud` claim on an ID
+  // token names the client that issued it, so googleAuthController verifies
+  // against all three (see googleAudiences()).
+  //
+  // All optional and empty-tolerant: the native IDs do not exist until the
+  // mobile app is set up, and this schema calls process.exit(1) on a failure —
+  // a required variable here would stop every current deployment from booting.
+  // Read via process.env in auth.controller.ts; declared here as documentation.
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_IOS_CLIENT_ID: z.string().optional(),
+  GOOGLE_ANDROID_CLIENT_ID: z.string().optional(),
+
   // Cloudflare R2 (S3-compatible) for user-contributed course PDFs. All optional
   // so the app still boots before storage is provisioned; the upload route
   // reports "not configured" until every one of these is set. See isR2Configured().

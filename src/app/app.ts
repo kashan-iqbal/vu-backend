@@ -7,6 +7,7 @@ import cookieParser from "cookie-parser";
 import { errorHandler } from "../common/middlewares/errorHandler";
 import { globalLimiter } from "../common/middlewares/rateLimit";
 import { csrfGuard } from "../common/middlewares/csrf.middleware";
+import { identifyUser } from "../common/middlewares/auth.middleware";
 import { env } from '../config/env';
 
 export function createApp() {
@@ -36,6 +37,11 @@ export function createApp() {
   // any route that mutates state. See csrf.middleware.ts for why the session
   // cookie being SameSite=None makes this necessary.
   app.use(csrfGuard);
+
+  // Identify the caller (verified JWT → req.authUserId) so the limiter below can
+  // bucket per user rather than per IP. Must run AFTER cookieParser and BEFORE
+  // globalLimiter. Not a gate — authGuard still protects each route.
+  app.use(identifyUser);
 
   // app-wide rate-limit backstop (health checks are exempt)
   app.use(globalLimiter);

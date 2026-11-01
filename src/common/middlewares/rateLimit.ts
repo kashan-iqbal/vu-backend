@@ -65,6 +65,22 @@ export const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many requests. Please try again later." },
+  // PER USER when we can identify one, per IP otherwise.
+  //
+  // Keying this purely on IP meant carrier-grade NAT lumped whole networks into
+  // one bucket: most students reach the API over Pakistani mobile data, where
+  // thousands of devices share a few egress IPs, so they were all drawing down a
+  // single 150-request budget. A quiz spends ~20 requests, so about seven
+  // concurrent quiz-takers on the same carrier exhausted it and everyone after
+  // them got a 429. That hits the web app too, not just mobile — it was simply
+  // masked because most web traffic is anonymous reads of the handout and
+  // pastquiz GETs, which are skipped below.
+  //
+  // `authUserId` comes from identifyUser, mounted app-wide BEFORE this limiter.
+  // It cannot come from `req.user`: authGuard runs per route, i.e. after this
+  // middleware, so `req.user` is always undefined here. (gdbLimiter can use
+  // req.user because it sits after authGuard on its own route.)
+  keyGenerator: (req) => req.authUserId ?? ipKeyGenerator(req.ip ?? ""),
   // Exempt:
   //  - the health check (uptime monitors / load balancers)
   //  - public, read-only handout/pastquiz GETs. The frontend's SSG build +

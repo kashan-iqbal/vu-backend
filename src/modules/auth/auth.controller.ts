@@ -166,7 +166,11 @@ export async function loginUser(req: Request, res: Response) {
 
         res.json({
             message: "Login successful",
-            success: true
+            success: true,
+            // Also returned in the body for the mobile app, which stores it in
+            // the device keychain and sends it as `Authorization: Bearer`. The
+            // web app ignores this and keeps using the httpOnly cookie above.
+            token,
         });
     } catch (err: any) {
         res.status(401).json({ message: err.message });
@@ -316,6 +320,23 @@ export async function resetPassword(req: Request, res: Response) {
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+/**
+ * Every Google OAuth client allowed to mint an ID token for this app.
+ *
+ * One client ID per platform, and the `aud` claim carries whichever one issued
+ * the token — so verifying against the web client alone rejected every token
+ * from the mobile app with a bare "Google authentication failed". Unset IDs are
+ * filtered out, so a deployment with only the web client behaves exactly as
+ * before.
+ */
+export function googleAudiences(): string[] {
+    return [
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_IOS_CLIENT_ID,
+        process.env.GOOGLE_ANDROID_CLIENT_ID,
+    ].filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+}
+
 
 export const googleAuthController = async (req: Request, res: Response) => {
 
@@ -328,7 +349,7 @@ export const googleAuthController = async (req: Request, res: Response) => {
         // Verify the Google token
         const ticket = await googleClient.verifyIdToken({
             idToken: credential,
-            audience: process.env.GOOGLE_CLIENT_ID,
+            audience: googleAudiences(),
         });
 
         const payload = ticket.getPayload();
@@ -386,7 +407,9 @@ export const googleAuthController = async (req: Request, res: Response) => {
 
         res.json({
             message: "Login successful",
-            success: true
+            success: true,
+            // Same contract as password login — see loginUser.
+            token,
         });
     } catch (error) {
         console.error("Google auth error:", error);
