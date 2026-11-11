@@ -32,8 +32,19 @@ export async function getPastQuizKeys(minCount = 1) {
   const rows = await PastQuizModel.aggregate<{
     _id: { code: string; type: string };
     count: number;
+    updatedAt?: Date;
   }>([
-    { $group: { _id: { code: "$code", type: "$type" }, count: { $sum: 1 } } },
+    // `updatedAt` is the newest MCQ in the pair, which is the real last-modified
+    // date for the /past-papers page built from them. The frontend had no date to
+    // put in schema.org `dateModified` or the sitemap's <lastmod> without it, and
+    // fabricating one is what made Google discount the sitemap in 2026-08.
+    {
+      $group: {
+        _id: { code: "$code", type: "$type" },
+        count: { $sum: 1 },
+        updatedAt: { $max: "$updatedAt" },
+      },
+    },
     { $match: { count: { $gte: minCount } } },
     { $sort: { "_id.code": 1, "_id.type": 1 } },
   ]);
@@ -41,5 +52,6 @@ export async function getPastQuizKeys(minCount = 1) {
     code: r._id.code,
     examType: r._id.type,
     count: r.count,
+    updatedAt: r.updatedAt,
   }));
 }
